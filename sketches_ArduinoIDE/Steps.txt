@@ -1,0 +1,115 @@
+Prueba de conexión entre Arduino Uno y Arduino Nano mediante jumpers
+
+Para comprobar la comunicación entre los dispositivos antes de utilizar el cable de cobre construido para el proyecto, 
+se realiza una prueba inicial con un Arduino Uno, un Arduino Nano, una protoboard y tres cables jumper. 
+Se decide emplear los pines digitales D8 y D9 en ambos Arduinos, utilizando D8 como recepción (RX) y D9 como transmisión (TX) 
+a través de la biblioteca SoftwareSerial. Esto permite reservar los pines D0 y D1 para la comunicación USB con la computadora.
+
+Pasos:
+
+- En primer lugar, con ambos Arduinos desconectados de la alimentación, se colcoloca el Arduino Nano sobre la ranura central de 
+  la protoboard y se identificaron los pines correspondientes en ambas placas. La conexión se realizó de forma cruzada: el pin 
+  D9 (TX) del Arduino Uno se conectó al pin D8 (RX) del Arduino Nano, mientras que el pin D9 (TX) del Nano se conectó al pin D8 
+  (RX) del Uno. Adicionalmente, se unieron los pines GND de ambos dispositivos mediante un tercer jumper.
+
+- Después de revisar las conexiones, se alimentaron los Arduinos mediante sus respectivos cables USB. Para esta prueba se utiliza 
+  una sola computadora, en la cual se abrió Arduino IDE. Aquí es necesario queSe configuraron los programas de ambas placas con la instrucción 
+  SoftwareSerial enlace(8, 9), cuyo primer argumento representa RX y el segundo TX. Tanto la comunicación serial con la computadora 
+  como el enlace entre los Arduinos se configuraron a 9600 baudios. ** Los códigos se adjuntan al final y los sketches para ArduinoIDE 
+  en sus respectivas carpetas.
+  Pasos de configuración en ArduinoIDE:
+    + Abrir ArduinoIDE, conectar únicamente el NANO por USB, seleccionar la placa y el puerto correspondientes en Herramientas → Placa o Puerto.
+    Para Placa se selecciona Nano y puerto el que sale, ya que sólo uno está conectado.
+    + Poner el código.
+    + Subirlo con el botón "->" debajo de la barra de herramientas.
+    + Cuándo termine, se desconecta.
+    + Abrir ArduinoIDE, conectar únicamente el UNO por USB, seleccionar la placa y el puerto correspondientes en Herramientas → Placa o Puerto.
+    Para Placa se selecciona Nano y puerto el que sale, ya que sólo uno está conectado.
+    + Poner el código.
+    + Subirlo con el botón "->" debajo de la barra de herramientas.
+    + Cuándo termine, se desconecta.
+
+- Para ejecutar la prueba, se conectan ambos USBs a la computadora, se selecciona el puerto del Arduino Uno en Arduino IDE y se abre el Monitor Serial. 
+Se establecie una velocidad de 9600 baudios y se elige la opción «New Line» (Nueva línea), de modo que cada mensaje terminara con el carácter de salto 
+de línea esperado por los programas. 
+
+- A continuación, se escribe en el mensaje en el Monitor Serial que se abre antes y se presiona Enter para iniciar el intercambio de mensajes.
+
+
+***** Códigos *****
+
+/************************** UNO **************************/
+
+#include <SoftwareSerial.h>
+
+SoftwareSerial enlace(8, 9); // RX, TX
+
+void setup() {
+  Serial.begin(9600);
+  enlace.begin(9600);
+
+  Serial.println("Arduino Uno listo!");
+  Serial.println("Escribe un mensaje para el Nano:");
+}
+
+void loop() {
+  // Enviar mensajes de laptop al Nano
+  if (Serial.available()) {
+    String mensaje = Serial.readStringUntil('\n');
+    mensaje.trim();
+
+    if (mensaje.length() > 0) {
+      Serial.print("Enviando: ");
+      Serial.println(mensaje);
+
+      enlace.println(mensaje);
+    }
+  }
+
+  // Recibir respuestas del Nano
+  if (enlace.available()) {
+    String respuesta = enlace.readStringUntil('\n');
+    respuesta.trim();
+
+    Serial.print("Respuesta del Nano: ");
+    Serial.println(respuesta);
+  }
+}
+
+/************************** NANO **************************/
+
+#include <SoftwareSerial.h>
+
+SoftwareSerial enlace(8, 9); // RX, TX
+
+void setup() {
+  Serial.begin(9600);
+  enlace.begin(9600);
+
+  Serial.println("Arduino Uno listo!");
+  Serial.println("Escribe un mensaje para el Nano:");
+}
+
+void loop() {
+  // Enviar mensajes de laptop al Nano
+  if (Serial.available()) {
+    String mensaje = Serial.readStringUntil('\n');
+    mensaje.trim();
+
+    if (mensaje.length() > 0) {
+      Serial.print("Enviando: ");
+      Serial.println(mensaje);
+
+      enlace.println(mensaje);
+    }
+  }
+
+  // Recibir respuestas del Nano
+  if (enlace.available()) {
+    String respuesta = enlace.readStringUntil('\n');
+    respuesta.trim();
+
+    Serial.print("Respuesta del Nano: ");
+    Serial.println(respuesta);
+  }
+}
