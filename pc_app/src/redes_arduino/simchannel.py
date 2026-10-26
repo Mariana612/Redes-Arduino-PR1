@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from . import frame, framing
 from .frame import Frame, FrameError
 from .gbn import UART_BITS_PER_BYTE
-from .session import Endpoint
+from .session import Endpoint, LinkConfig
 
 MAX_STEPS_SAME_TIME = 10_000
 
@@ -75,8 +75,8 @@ class SimLink:
         self._arrivals: list[tuple[float, int, int, bytes]] = []
         self._tie = itertools.count()
 
-    def _start(self, d: _Direction, fr: Frame) -> None:
-        wire = framing.encode_physical(fr.encode(), d.src.config.hamming)
+    def _start(self, d: _Direction, fr: Frame, config: LinkConfig) -> None:
+        wire = framing.encode_physical(fr.encode(), d.src.config.hamming, config)
         duration = len(wire) * UART_BITS_PER_BYTE / d.src.config.speed.baud
         d.frame = fr
         lost = self.drop is not None and self.drop(d.src.name, fr)
@@ -110,7 +110,7 @@ class SimLink:
                 continue
             d.dst.on_frame(received, self.now)
 
-    def run(self, until: float = 3600.0) -> bool:
+    def run(self, config: LinkConfig, until: float = 3600.0) -> bool:
         """Simula hasta que ambas terminales terminan (True) o hasta `until` (False)."""
         same_time_steps = 0
         try:
@@ -119,7 +119,7 @@ class SimLink:
                     if d.frame is None:
                         fr = d.src.next_frame(self.now)
                         if fr is not None:
-                            self._start(d, fr)
+                            self._start(d, fr, config)
 
                 candidates = [d.finish for d in self.dirs if d.frame is not None]
                 if self._arrivals:

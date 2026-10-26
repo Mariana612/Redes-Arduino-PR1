@@ -11,6 +11,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from . import hamming
+from .serial_comm import exchange_frame
+from .session import LinkConfig
 
 FLAG = 0x7E
 ESC = 0x7D
@@ -47,12 +49,6 @@ def unstuff(data: bytes) -> bytes:
     return bytes(out)
 
 
-def encode_physical(body: bytes, use_hamming: bool) -> bytes:
-    """Bytes que el Arduino emisor pone en el cable para un cuerpo de trama."""
-    coded = hamming.encode_bytes(body) if use_hamming else body
-    return bytes((FLAG,)) + stuff(coded) + bytes((FLAG,))
-
-
 @dataclass
 class PhysicalFrame:
     body: bytes
@@ -61,20 +57,28 @@ class PhysicalFrame:
     reason: str | None = None
 
 
-def decode_physical(raw: bytes, use_hamming: bool) -> PhysicalFrame:
-    """Decodifica el contenido entre dos delimitadores (sin incluirlos)."""
-    try:
-        coded = unstuff(raw)
-    except ValueError as exc:
-        return PhysicalFrame(b"", False, reason=str(exc))
-    if not use_hamming:
-        return PhysicalFrame(coded, True)
-    if len(coded) % 2:
-        return PhysicalFrame(b"", False, reason="longitud Hamming impar")
-    body, stats = hamming.decode_bytes(coded)
-    if stats.uncorrectable:
-        return PhysicalFrame(body, False, stats, "error Hamming no corregible")
-    return PhysicalFrame(body, True, stats)
+def encode_physical(
+    body: bytes,
+    use_hamming: bool,
+    config: LinkConfig | None = None,
+    *,
+    port: str | None = None,
+) -> bytes:
+    """Codifica una trama; con `port`, también intercambia una trama con el Arduino."""
+    if config is None:
+        config = LinkConfig()
+    coded = hamming.encode_bytes(body) if use_hamming else body
+    wire = bytes((FLAG,)) + stuff(coded) + bytes((FLAG,))
+    if port is None:
+        return wire
+
+    return exchange_frame(wire, port, config.speed.baud, config.timeout())
+
+
+def encode_physical(body: bytes, use_hamming: bool) -> bytes:
+    """Bytes que el Arduino emisor pone en el cable para un cuerpo de trama."""
+    coded = hamming.encode_bytes(body) if use_hamming else body
+    return bytes((FLAG,)) + stuff(coded) + bytes((FLAG,))
 
 
 class Deframer:

@@ -54,7 +54,7 @@ def transfer(
     sa = a.send_file(data, file_type, 1, timeout, max_retries)
     sb = b.send_file(data, file_type, 2, timeout, max_retries) if both else None
     link = SimLink(a, b, ber=ber, seed=seed, latency=latency)
-    link.run(until)
+    link.run(config, until)
 
     def result(s: SenderSession, tx: Endpoint, rx: Endpoint) -> Result:
         got = rx.receiver.data
