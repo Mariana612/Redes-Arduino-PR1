@@ -1,0 +1,22 @@
+Prueba de condificador y decodificador Hamming
+
+Pasos:
+
+- Abrir Arduino IDE y crear un sketch nuevo, o abrir el que se encuentra en sketches_ArduinoIDE/TestHamming.
+- En la pestaña principal está TestHamming.ino.
+- Crear una pestaña nueva con el nombre exacto Hamming.h.
+- Pegar en Hamming.h exactamente la clase de Hamming.
+- En TestHamming.ino, poner el programa de prueba con setup() y loop().
+- Conectar el Arduino por USB.
+- En Tools → Board, seleccionar el modelo de Arduino.
+- En Tools → Port, selecciona el puerto correspondiente.
+- Presionar Verify para comprobar que compile.
+- Presionar Upload.
+- Abrir Serial Monitor y seleccionar velocidad (Ej: 115200 baud).
+
+
+***** Códigos *****
+
+/************************** Clase Hamming **************************/
+
+Se encuentra en: sketches_ArduinoIDE/hamming/hamming.c
