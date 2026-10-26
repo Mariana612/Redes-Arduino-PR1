@@ -49,15 +49,15 @@ def test_lost_frame_goes_back_to_base() -> None:
     frames = drain(s, 0)
     for f in frames:
         s.on_transmitted(f.seq, 0)
-    acks = [r.on_data(f) for f in frames if f.seq != 1]  # se pierde la trama 1
-    assert [a.ack for a in acks] == [1, 1, 1]  # 2 y 3 se descartan
+    acks = [r.on_data(f) for f in frames if f.seq != 1]
+    assert [a.ack for a in acks] == [1, 1, 1]
     assert r.discarded == 2
     for a in acks:
         s.on_ack(Ack.from_frame(a), 0.2)
     assert s.base == 1
-    assert [f.seq for f in drain(s, 0.5)] == [4]  # se abrió un lugar en la ventana
-    assert drain(s, 1.1) == []  # el timer se reinició en t=0.2 al avanzar: vence en 1.2
-    assert [f.seq for f in drain(s, 1.2)] == [1, 2, 3, 4]  # go back N
+    assert [f.seq for f in drain(s, 0.5)] == [4]
+    assert drain(s, 1.1) == []
+    assert [f.seq for f in drain(s, 1.2)] == [1, 2, 3, 4]
     assert s.retransmissions == 4
     assert s.timeouts == 1
 
@@ -65,7 +65,6 @@ def test_lost_frame_goes_back_to_base() -> None:
 def test_lost_ack_is_covered_by_cumulative_ack() -> None:
     s, r = mk(window=4), GbnReceiver(7)
     acks = [r.on_data(f) for f in drain(s, 0)]
-    # se pierden los ACK 1, 2 y 3; llega el 4
     assert s.on_ack(Ack.from_frame(acks[-1]), 0)
     assert s.base == 4
 
@@ -74,7 +73,7 @@ def test_timer_starts_when_base_is_transmitted() -> None:
     s = mk(timeout=1.0)
     drain(s, 0)
     assert s.next_deadline() is None
-    s.on_transmitted(1, 3.0)  # no es la base
+    s.on_transmitted(1, 3.0)
     assert s.next_deadline() is None
     s.on_transmitted(0, 5.0)
     assert s.next_deadline() == 6.0
@@ -93,9 +92,9 @@ def test_ack_advance_restarts_or_stops_timer() -> None:
 def test_ignores_foreign_duplicate_and_out_of_range_acks() -> None:
     s = mk(window=4)
     drain(s, 0)
-    assert not s.on_ack(Ack(99, 2), 0)  # otra transferencia
-    assert not s.on_ack(ack(0), 0)  # duplicado (no avanza)
-    assert not s.on_ack(ack(9), 0)  # confirma tramas nunca enviadas
+    assert not s.on_ack(Ack(99, 2), 0)
+    assert not s.on_ack(ack(0), 0)
+    assert not s.on_ack(ack(9), 0)
     assert s.base == 0
 
 

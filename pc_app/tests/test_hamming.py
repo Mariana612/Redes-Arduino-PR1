@@ -9,13 +9,12 @@ from redes_arduino.hamming import Status
 @pytest.mark.parametrize("value", range(256))
 def test_roundtrip(value: int) -> None:
     word = hamming.encode_byte(value)
-    assert word < 1 << 13  # los 3 bits altos van en cero
+    assert word < 1 << 13
     assert hamming.decode_word(word) == (value, Status.OK)
 
 
 def test_known_vectors() -> None:
     assert hamming.encode_byte(0x00) == 0x0000
-    # 0x01 -> d0 en posición 3; paridades p1 y p2 en 1; total 3 unos -> global en 1
     assert hamming.encode_byte(0x01) == 0b1_0000_0000_0111
 
 
@@ -46,8 +45,8 @@ def test_bytes_roundtrip_and_stats() -> None:
     data = bytes(range(256))
     coded = bytearray(hamming.encode_bytes(data))
     assert len(coded) == 512
-    coded[1] ^= 0x01  # 1 bit en el bloque 0 -> corregido
-    coded[11] ^= 0x03  # 2 bits en el bloque 5 -> no corregible
+    coded[1] ^= 0x01
+    coded[11] ^= 0x03
     decoded, stats = hamming.decode_bytes(bytes(coded))
     assert stats.blocks == 256
     assert stats.corrected == 1

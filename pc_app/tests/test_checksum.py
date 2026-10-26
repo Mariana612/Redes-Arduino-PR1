@@ -2,7 +2,6 @@ from redes_arduino.checksum import checksum, verify
 
 
 def test_rfc1071_example() -> None:
-    # Ejemplo de RFC 1071 sección 3: suma = 0xDDF2 -> checksum = 0x220D
     data = bytes.fromhex("0001f203f4f5f6f7")
     assert checksum(data) == 0x220D
     assert verify(data, 0x220D)

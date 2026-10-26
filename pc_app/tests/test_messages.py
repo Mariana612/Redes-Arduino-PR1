@@ -29,11 +29,11 @@ def test_start_layout_14_bytes() -> None:
 @pytest.mark.parametrize(
     "bad",
     [
-        bytes.fromhex("00000001 00000010 01 01 01f4 05 00"),  # ventana 5
-        bytes.fromhex("00000001 00000010 01 01 0100 04 00"),  # carga 256
-        bytes.fromhex("00000001 00000010 04 01 01f4 04 00"),  # tipo 4
-        bytes.fromhex("00000001 00000010 01 03 01f4 04 00"),  # velocidad 3
-        bytes.fromhex("00000001 00000010 01 01 01f4 04 02"),  # hamming 2
+        bytes.fromhex("00000001 00000010 01 01 01f4 05 00"),
+        bytes.fromhex("00000001 00000010 01 01 0100 04 00"),
+        bytes.fromhex("00000001 00000010 04 01 01f4 04 00"),
+        bytes.fromhex("00000001 00000010 01 03 01f4 04 00"),
+        bytes.fromhex("00000001 00000010 01 01 01f4 04 02"),
         bytes(13),
     ],
 )

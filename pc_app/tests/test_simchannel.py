@@ -35,7 +35,6 @@ def test_full_duplex_both_directions_at_once() -> None:
     ab, ba = demo.transfer(DATA, LinkConfig(), both=True)
     assert ba is not None
     assert ab.ok and ba.ok
-    # en paralelo, no en serie: tarda poco más que una sola transferencia
     assert ab.seconds < 1.3 * single.seconds
 
 

@@ -57,7 +57,7 @@ def test_lost_start_ack_does_not_duplicate_transfer() -> None:
     s, _, b = run(drop)
     assert s.phase is Phase.DONE
     assert sum(f.type is FrameType.START for f in sent) == 2
-    assert sum(f.type is FrameType.START_ACK for f in sent) == 2  # respuesta repetida
+    assert sum(f.type is FrameType.START_ACK for f in sent) == 2
     assert b.receiver.data == DATA
 
 
@@ -72,7 +72,7 @@ def test_lost_fin_ack_answered_from_cache() -> None:
 def test_hash_mismatch_fails_both_sides() -> None:
     a, b = Endpoint("A", CFG), Endpoint("B", CFG)
     s = a.send_file(DATA, FileType.TXT, 42, timeout=1.0)
-    s._fin = Fin(42, bytes(32)).to_frame()  # SHA-256 falso
+    s._fin = Fin(42, bytes(32)).to_frame()
     SimLink(a, b).run()
     assert s.phase is Phase.FAILED and s.error is not None and "HASH_MISMATCH" in s.error
     assert b.receiver.phase is Phase.FAILED and b.receiver.data is None
@@ -107,7 +107,7 @@ def test_receiver_busy_rejects_second_transfer() -> None:
     a, b = Endpoint("A", CFG), Endpoint("B", CFG)
     a.send_file(DATA, FileType.TXT, 1)
     link = SimLink(a, b)
-    link.run(until=0.5)  # la primera transferencia ya empezó
+    link.run(until=0.5)
     assert b.receiver.phase is Phase.TRANSFERRING
     from redes_arduino.messages import Speed, Start, StartAck, StartStatus
 

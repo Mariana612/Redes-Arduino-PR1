@@ -36,14 +36,14 @@ def test_deframer_byte_by_byte_with_garbage(use_hamming: bool) -> None:
 
 def test_deframer_reports_hamming_correction() -> None:
     wire = bytearray(framing.encode_physical(b"\x41", True))
-    wire[2] ^= 0x04  # 1 bit en el único bloque (no crea 0x7E/0x7D)
+    wire[2] ^= 0x04
     (pf,) = framing.Deframer(True).feed(bytes(wire))
     assert pf.valid and pf.body == b"\x41"
     assert pf.stats is not None and pf.stats.corrected == 1
 
 
 def test_deframer_marks_double_error_invalid() -> None:
-    word = hamming.encode_byte(0x41) ^ 0b11  # 2 bits
+    word = hamming.encode_byte(0x41) ^ 0b11
     wire = b"\x7e" + framing.stuff(word.to_bytes(2, "big")) + b"\x7e"
     (pf,) = framing.Deframer(True).feed(wire)
     assert not pf.valid
