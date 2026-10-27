@@ -139,6 +139,7 @@ class FileTransferApp:
                     font=("Helvetica", 16, "bold")).pack(anchor="w")
         self._label(self.settings, "Parámetros del enlace", bg=PANEL, fg=MUTED,
                     font=("Helvetica", 9)).pack(anchor="w", pady=(5, 21))
+        self._setting_choice("Puerto serial", "", self._serial_ports(), editable=True)
         self._setting_choice("Velocidad de transmisión", "9600 bps",
                              ["9600 bps", "19200 bps"])
         self._setting_choice("Tamaño de carga útil", "500 bytes", ["500 bytes", "900 bytes"])
@@ -160,11 +161,22 @@ class FileTransferApp:
                     bg=PANEL, fg=MUTED, font=("Helvetica", 8), wraplength=240,
                     justify="left").pack(anchor="w", pady=(22, 0))
 
-    def _setting_choice(self, title, default, values):
+    def _serial_ports(self):
+        try:
+            from serial.tools import list_ports
+            return [port.device for port in list_ports.comports()]
+        except ImportError:
+            return []
+
+    def _setting_choice(self, title, default, values, editable=False):
         self._label(self.settings, title, bg=PANEL, fg="#4d5660",
                     font=("Helvetica", 9, "bold")).pack(anchor="w", pady=(0, 7))
-        choice = ttk.Combobox(self.settings, values=values, state="readonly")
-        choice.set(default)
+        choice = ttk.Combobox(self.settings, values=values,
+                              state="normal" if editable else "readonly")
+        if default:
+            choice.set(default)
+        if title == "Puerto serial":
+            self.port_choice = choice
         choice.pack(fill="x", pady=(0, 16))
 
     def toggle_settings(self):
