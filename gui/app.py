@@ -26,6 +26,7 @@ class FileTransferApp:
         self.selected_file = None
         self.settings_open = False
         self.serial_connection = None
+        self.serial_reader_running = False
         self.transfer_running = False
         self.transfer_id = None
 
@@ -312,6 +313,8 @@ class FileTransferApp:
                 timeout=timeout,
                 write_timeout=timeout,
             )
+            self.serial_reader_running = True
+            threading.Thread(target=self._listen_for_start, daemon=True).start()
             self.connection_test_status.config(
                 text=f"Conectado a {port} a {baudrate} bps.", fg=ACCENT
             )
@@ -337,6 +340,46 @@ class FileTransferApp:
             self.selected_file = path
             self.file_label.config(text=path.rsplit("/", 1)[-1], fg=TEXT)
             self.transfer_status.config(text="Archivo listo para enviar.", fg=MUTED)
+
+    def _listen_for_start(self):
+        """Escucha tramas START entrantes y muestra el aviso en esta ventana."""
+        buffer = bytearray()
+        while self.serial_reader_running and self.serial_connection is not None:
+            try:
+                value = self.serial_connection.read(1)
+            except Exception:
+                break
+            if not value:
+                continue
+
+            byte = value[0]
+            if byte == 0x7E:
+                if buffer:
+                    frame = bytes(buffer)
+                    buffer.clear()
+                    if self._is_start_frame(frame):
+                        self.root.after(0, self._show_start_received, frame)
+                else:
+                    buffer.clear()
+            elif buffer:
+                buffer.append(byte)
+
+    @classmethod
+    def _is_start_frame(cls, frame):
+        # control + seq + ack + payload length + 14-byte START + checksum
+        if len(frame) != 3 + 2 + 14 + 2 or frame[0] != 0x03:
+            return False
+        payload_length = int.from_bytes(frame[3:5], "big")
+        if payload_length != 14:
+            return False
+        return cls._ones_complement_checksum(frame[:-2]) == int.from_bytes(frame[-2:], "big")
+
+    def _show_start_received(self, frame):
+        transfer_id = int.from_bytes(frame[5:9], "big")
+        self.transfer_status.config(
+            text=f"Conexión iniciada: se recibió START (transferencia {transfer_id:08X}).",
+            fg=ACCENT,
+        )
 
     def test_reconstruction(self):
         source_path = filedialog.askopenfilename(
@@ -406,6 +449,7 @@ class FileTransferApp:
                 file_data = selected_file.read()
             payload_size = int(self.payload_choice.get().split()[0])
             baudrate = int(self.baud_choice.get().split()[0])
+            self.send_start_frame(self.selected_file)
         except (OSError, ValueError, AttributeError) as exc:
             self.transfer_status.config(text=f"No se pudo preparar el archivo: {exc}", fg="#b54747")
             return
