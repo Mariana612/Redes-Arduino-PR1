@@ -11,25 +11,27 @@ void setup() {
 }
 
 void loop() {
-  // Enviar mensajes de laptop al Nano
+  // La aplicación del computador Uno inicia el handshake por USB.
   if (Serial.available()) {
     String mensaje = Serial.readStringUntil('\n');
     mensaje.trim();
-
-    if (mensaje.length() > 0) {
-      Serial.print("Enviando: ");
-      Serial.println(mensaje);
-
+    if (mensaje.startsWith("DUINO_HELLO:")) {
       enlace.println(mensaje);
     }
   }
 
-  // Recibir respuestas del Nano
+  // El Nano devuelve el token solo si recibió el mensaje por RX/TX.
   if (enlace.available()) {
     String respuesta = enlace.readStringUntil('\n');
     respuesta.trim();
-
-    Serial.print("Respuesta del Nano: ");
-    Serial.println(respuesta);
+    if (respuesta.startsWith("DUINO_HELLO:")) {
+      String token = respuesta.substring(String("DUINO_HELLO:").length());
+      enlace.print("DUINO_ACK:");
+      enlace.println(token);
+      Serial.print("DUINO_CONNECTED:");
+      Serial.println(token);
+    } else if (respuesta.startsWith("DUINO_ACK:")) {
+      Serial.println(respuesta);
+    }
   }
 }

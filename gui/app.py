@@ -180,6 +180,13 @@ class FileTransferApp:
                                      padx=12, pady=9, font=("Helvetica", 10, "bold"),
                                      cursor="hand2")
         self.test_button.pack(fill="x", pady=(16, 0))
+        self.handshake_button = tk.Button(
+            self.settings, text="Comprobar enlace UNO–Nano",
+            command=self.start_handshake, bg="#e8f0fa", fg="#285d91",
+            activebackground="#d9e7f5", relief="flat", bd=0,
+            padx=12, pady=9, font=("Helvetica", 10, "bold"), cursor="hand2",
+        )
+        self.handshake_button.pack(fill="x", pady=(10, 0))
         self.connection_test_status = self._label(self.settings, "Prueba el enlace USB y la comunicación Uno–Nano.",
                                                    bg=PANEL, fg=MUTED, font=("Helvetica", 8),
                                                    wraplength=240, justify="left")
@@ -330,6 +337,34 @@ class FileTransferApp:
             self.connection_test_status.config(text=f"No se pudo abrir el puerto: {exc}", fg="#b54747")
             self.connection_indicator.config(text="●  Sin conexión", fg=MUTED)
 
+    def start_handshake(self):
+        if self.serial_connection is None or not self.serial_connection.is_open:
+            self.connection_test_status.config(
+                text="Conecta primero el puerto USB del Arduino con «Probar conexión».",
+                fg="#b54747",
+            )
+            return
+
+        token = secrets.token_hex(4).upper()
+        self.pending_handshake = token
+        self.connection_test_status.config(
+            text="Esperando respuesta del otro Arduino…", fg=MUTED
+        )
+        try:
+            self.serial_connection.write(f"DUINO_HELLO:{token}\n".encode("ascii"))
+            self.serial_connection.flush()
+        except Exception as exc:
+            self.connection_test_status.config(text=f"No se pudo iniciar el handshake: {exc}", fg="#b54747")
+            return
+        self.root.after(4000, self._handshake_timeout, token)
+
+    def _handshake_timeout(self, token):
+        if getattr(self, "pending_handshake", None) == token:
+            self.pending_handshake = None
+            self.connection_test_status.config(
+                text="Sin respuesta. Revisa RX/TX cruzados, GND común y ambos sketches.",
+                fg="#b54747",
+            )
     def choose_file(self):
         path = filedialog.askopenfilename(
             title="Seleccionar archivo",
@@ -342,8 +377,10 @@ class FileTransferApp:
             self.transfer_status.config(text="Archivo listo para enviar.", fg=MUTED)
 
     def _listen_for_start(self):
-        """Escucha tramas START entrantes y muestra el aviso en esta ventana."""
+        """Escucha avisos de handshake y tramas START desde el Arduino."""
         buffer = bytearray()
+        line = bytearray()
+        in_frame = False
         while self.serial_reader_running and self.serial_connection is not None:
             try:
                 value = self.serial_connection.read(1)
@@ -354,15 +391,40 @@ class FileTransferApp:
 
             byte = value[0]
             if byte == 0x7E:
-                if buffer:
+                if in_frame and buffer:
                     frame = bytes(buffer)
-                    buffer.clear()
                     if self._is_start_frame(frame):
                         self.root.after(0, self._show_start_received, frame)
+                    buffer.clear()
+                    in_frame = False
                 else:
                     buffer.clear()
-            elif buffer:
+                    in_frame = True
+            elif in_frame:
                 buffer.append(byte)
+            elif byte == 10:
+                self.root.after(0, self._handle_handshake_line, bytes(line).strip())
+                line.clear()
+            elif byte != 13:
+                line.append(byte)
+
+    def _handle_handshake_line(self, line):
+        text = line.decode("ascii", errors="ignore")
+        if text.startswith("DUINO_CONNECTED:"):
+            token = text.partition(":")[2]
+        elif text.startswith("DUINO_ACK:"):
+            token = text.partition(":")[2]
+            if token != getattr(self, "pending_handshake", None):
+                return
+        else:
+            return
+        if token:
+            if token == getattr(self, "pending_handshake", None):
+                self.pending_handshake = None
+            self.connection_test_status.config(
+                text="Enlace UNO–Nano confirmado: respuesta recibida por RX/TX.", fg=ACCENT
+            )
+            self.connection_indicator.config(text="●  UNO–Nano conectado", fg=ACCENT)
 
     @classmethod
     def _is_start_frame(cls, frame):
