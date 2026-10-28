@@ -1,37 +1,59 @@
 #include <SoftwareSerial.h>
 
-SoftwareSerial enlace(8, 9); // RX, TX
+// SoftwareSerial(RX, TX): UNO D8 recibe del Nano D9; UNO D9 transmite al Nano D8.
+SoftwareSerial enlace(8, 9);
+const long USB_BAUD = 115200;
+long linkBaud = 9600;
+bool usbInFrame = false;
+bool linkInFrame = false;
+String usbLine;
+String linkLine;
+
+void setLinkBaudFromCommand(String &line) {
+  if (!line.startsWith("DUINO_CONFIG|") && !line.startsWith("DUINO_CONFIG_ACK|")) return;
+  int first = line.indexOf('|');
+  int second = line.indexOf('|', first + 1);
+  int third = line.indexOf('|', second + 1);
+  if (second < 0 || third < 0) return;
+  long requested = line.substring(second + 1, third).toInt();
+  if (requested == 9600 || requested == 19200) {
+    linkBaud = requested;
+    enlace.end();
+    enlace.begin(linkBaud);
+  }
+}
+
+void inspectByte(uint8_t value, bool &inFrame, String &line) {
+  if (value == 0x7E) {
+    inFrame = !inFrame;
+    line = "";
+    return;
+  }
+  if (inFrame) return;
+  if (value == '\n') {
+    setLinkBaudFromCommand(line);
+    line = "";
+  } else if (value != '\r' && line.length() < 100) {
+    line += (char)value;
+  } else if (line.length() >= 100) {
+    line = "";
+  }
+}
 
 void setup() {
-  Serial.begin(9600);
-  enlace.begin(9600);
-
-  Serial.println("Arduino Uno listo!");
-  Serial.println("Escribe un mensaje para el Nano:");
+  Serial.begin(USB_BAUD);
+  enlace.begin(linkBaud);
 }
 
 void loop() {
-  // La aplicación del computador Uno inicia el handshake por USB.
-  if (Serial.available()) {
-    String mensaje = Serial.readStringUntil('\n');
-    mensaje.trim();
-    if (mensaje.startsWith("DUINO_HELLO:")) {
-      enlace.println(mensaje);
-    }
+  while (Serial.available()) {
+    uint8_t value = Serial.read();
+    enlace.write(value);
+    inspectByte(value, usbInFrame, usbLine);
   }
-
-  // El Nano devuelve el token solo si recibió el mensaje por RX/TX.
-  if (enlace.available()) {
-    String respuesta = enlace.readStringUntil('\n');
-    respuesta.trim();
-    if (respuesta.startsWith("DUINO_HELLO:")) {
-      String token = respuesta.substring(String("DUINO_HELLO:").length());
-      enlace.print("DUINO_ACK:");
-      enlace.println(token);
-      Serial.print("DUINO_CONNECTED:");
-      Serial.println(token);
-    } else if (respuesta.startsWith("DUINO_ACK:")) {
-      Serial.println(respuesta);
-    }
+  while (enlace.available()) {
+    uint8_t value = enlace.read();
+    Serial.write(value);
+    inspectByte(value, linkInFrame, linkLine);
   }
 }

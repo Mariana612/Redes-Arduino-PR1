@@ -1,10 +1,10 @@
 import tkinter as tk
-import secrets
-import struct
-import threading
-import time
 from pathlib import Path
 from tkinter import filedialog, ttk
+
+from serial_transfer import SerialTransferWorker
+from redes_arduino.messages import FileType, Speed
+from redes_arduino.session import LinkConfig
 
 
 BG = "#f7f8fa"
@@ -26,9 +26,8 @@ class FileTransferApp:
         self.selected_file = None
         self.settings_open = False
         self.serial_connection = None
-        self.serial_reader_running = False
+        self.protocol_worker = None
         self.transfer_running = False
-        self.transfer_id = None
 
         self._style()
         self._build()
@@ -173,7 +172,7 @@ class FileTransferApp:
         self.hamming_var = tk.BooleanVar(value=False)
         tk.Checkbutton(row, variable=self.hamming_var, text="Activado", bg=PANEL, fg=TEXT,
                        activebackground=PANEL, activeforeground=TEXT, selectcolor=PANEL_LIGHT,
-                       font=("Helvetica", 9)).pack(side="right")
+                       font=("Helvetica", 9), command=self._settings_changed).pack(side="right")
         self.test_button = tk.Button(self.settings, text="Probar conexión",
                                      command=self.test_connection, bg="#e8f0fa", fg="#285d91",
                                      activebackground="#d9e7f5", relief="flat", bd=0,
@@ -226,6 +225,15 @@ class FileTransferApp:
         elif title == "Límite de espera":
             self.timeout_choice = choice
         choice.pack(fill="x", pady=(0, 16))
+        choice.bind("<<ComboboxSelected>>", self._settings_changed)
+
+    def _settings_changed(self, _event=None):
+        if self.protocol_worker is None:
+            return
+        try:
+            self.protocol_worker.update_config(self._current_config(), self._current_timeout())
+        except (ValueError, AttributeError, KeyError):
+            pass
 
     def toggle_settings(self):
         if self.settings_open:
@@ -235,70 +243,7 @@ class FileTransferApp:
         self.settings_open = not self.settings_open
 
     def test_send(self):
-        if not self.selected_file:
-            self.transfer_status.config(text="Selecciona un archivo para probar START.", fg="#ffb86b")
-            return
-        try:
-            frame = self.send_start_frame(self.selected_file)
-            if self.serial_connection is not None and self.serial_connection.is_open:
-                self.transfer_status.config(text="Trama START enviada por el puerto serial.", fg=ACCENT)
-            else:
-                self.transfer_status.config(text="Trama START generada; revisa la consola.", fg=MUTED)
-            return frame
-        except (OSError, ValueError, AttributeError) as exc:
-            self.transfer_status.config(text=f"No se pudo generar START: {exc}", fg="#b54747")
-
-    def send_start_frame(self, file_path):
-        """Construye y envía START; si no hay serial, la imprime para una prueba local."""
-        path = Path(file_path)
-        extension_to_type = {".txt": 0x01, ".pdf": 0x02, ".png": 0x03}
-        file_type = extension_to_type.get(path.suffix.lower())
-        if file_type is None:
-            raise ValueError("START solo admite archivos TXT, PDF o PNG.")
-
-        file_size = path.stat().st_size
-        baudrate = int(self.baud_choice.get().split()[0])
-        payload_size = int(self.payload_choice.get().split()[0])
-        window_size = int(self.window_choice.get().split()[0])
-        hamming_mode = 0x01 if self.hamming_var.get() else 0x00
-        speed_code = {9600: 0x01, 19200: 0x02}.get(baudrate)
-        if speed_code is None or payload_size not in (500, 900) or window_size not in (4, 6, 8):
-            raise ValueError("La configuración seleccionada no corresponde al protocolo.")
-
-        self.transfer_id = secrets.randbits(32)
-        payload = struct.pack(
-            ">IIBBHBB", self.transfer_id, file_size, file_type, speed_code,
-            payload_size, window_size, hamming_mode,
-        )
-        control, sequence, ack = 0x03, 0xFF, 0xFF
-        length = len(payload).to_bytes(2, "big")
-        protected_fields = bytes((control, sequence, ack)) + length + payload
-        checksum = self._ones_complement_checksum(protected_fields)
-        frame = bytes((0x7E,)) + protected_fields + checksum.to_bytes(2, "big") + bytes((0x7E,))
-
-        print("\nTrama START")
-        print(f"Transferencia: {self.transfer_id:08X} | Archivo: {path.name} | Bytes: {file_size}")
-        print(f"Longitud de payload START: {len(payload)} bytes")
-        print(f"Trama lógica ({len(frame)} bytes): {frame.hex(' ')}")
-
-        if self.serial_connection is not None and self.serial_connection.is_open:
-            self.serial_connection.baudrate = baudrate
-            self.serial_connection.write(frame)
-            self.serial_connection.flush()
-            print(f"START escrito en {self.serial_connection.port} a {baudrate} bps.")
-        else:
-            print("Sin conexión serial: START solo se generó localmente.")
-        return frame
-
-    @staticmethod
-    def _ones_complement_checksum(data):
-        if len(data) % 2:
-            data += b"\x00"
-        total = sum(int.from_bytes(data[index:index + 2], "big")
-                    for index in range(0, len(data), 2))
-        while total >> 16:
-            total = (total & 0xFFFF) + (total >> 16)
-        return (~total) & 0xFFFF
+        self.start_transfer()
 
     def test_connection(self):
         port = self.port_choice.get().strip()
@@ -309,21 +254,24 @@ class FileTransferApp:
         try:
             import serial
 
-            baudrate = int(self.baud_choice.get().split()[0])
-            timeout = int(self.timeout_choice.get().split()[0]) / 1000
+            config = self._current_config()
+            timeout_seconds = self._current_timeout()
             if self.serial_connection is not None and self.serial_connection.is_open:
+                if self.protocol_worker is not None:
+                    self.protocol_worker.close()
                 self.serial_connection.close()
 
             self.serial_connection = serial.Serial(
                 port=port,
-                baudrate=baudrate,
-                timeout=timeout,
-                write_timeout=timeout,
+                baudrate=115200,
+                timeout=0.05,
+                write_timeout=1,
             )
-            self.serial_reader_running = True
-            threading.Thread(target=self._listen_for_start, daemon=True).start()
+            self.protocol_worker = SerialTransferWorker(
+                self.serial_connection, config, timeout_seconds, self._protocol_event
+            )
             self.connection_test_status.config(
-                text=f"Conectado a {port} a {baudrate} bps.", fg=ACCENT
+                text=f"USB conectado a {port}; enlace listo para negociar.", fg=ACCENT
             )
             self.connection_indicator.config(text="●  Conectado", fg=ACCENT)
         except ImportError:
@@ -338,33 +286,79 @@ class FileTransferApp:
             self.connection_indicator.config(text="●  Sin conexión", fg=MUTED)
 
     def start_handshake(self):
-        if self.serial_connection is None or not self.serial_connection.is_open:
+        if self.protocol_worker is None:
             self.connection_test_status.config(
                 text="Conecta primero el puerto USB del Arduino con «Probar conexión».",
                 fg="#b54747",
             )
             return
-
-        token = secrets.token_hex(4).upper()
-        self.pending_handshake = token
-        self.connection_test_status.config(
-            text="Esperando respuesta del otro Arduino…", fg=MUTED
-        )
         try:
-            self.serial_connection.write(f"DUINO_HELLO:{token}\n".encode("ascii"))
-            self.serial_connection.flush()
-        except Exception as exc:
-            self.connection_test_status.config(text=f"No se pudo iniciar el handshake: {exc}", fg="#b54747")
-            return
-        self.root.after(4000, self._handshake_timeout, token)
+            self.protocol_worker.update_config(self._current_config(), self._current_timeout())
+            self.protocol_worker.check_config()
+        except (ValueError, AttributeError) as exc:
+            self.connection_test_status.config(text=f"Configuración inválida: {exc}", fg="#b54747")
 
-    def _handshake_timeout(self, token):
-        if getattr(self, "pending_handshake", None) == token:
-            self.pending_handshake = None
-            self.connection_test_status.config(
-                text="Sin respuesta. Revisa RX/TX cruzados, GND común y ambos sketches.",
-                fg="#b54747",
-            )
+    def _current_config(self):
+        baudrate = int(self.baud_choice.get().split()[0])
+        return LinkConfig(
+            speed={9600: Speed.BPS_9600, 19200: Speed.BPS_19200}[baudrate],
+            payload_size=int(self.payload_choice.get().split()[0]),
+            window=int(self.window_choice.get().split()[0]),
+            hamming=self.hamming_var.get(),
+        )
+
+    def _current_timeout(self):
+        return int(self.timeout_choice.get().split()[0]) / 1000
+
+    def _protocol_event(self, event, *values):
+        self.root.after(0, self._apply_protocol_event, event, values)
+
+    def _apply_protocol_event(self, event, values):
+        if event == "connected":
+            self.connection_test_status.config(text=values[0], fg=ACCENT)
+            self.connection_indicator.config(text="●  UNO–Nano conectado", fg=ACCENT)
+            self.transfer_status.config(text="Handshake correcto; parámetros compatibles.", fg=ACCENT)
+        elif event == "status":
+            self.transfer_status.config(text=values[0], fg=MUTED)
+            self.connection_test_status.config(text=values[0], fg=MUTED)
+        elif event == "error":
+            self.transfer_running = False
+            self.send_button.config(text="Enviar archivo", bg="#1769d2")
+            self.transfer_status.config(text=values[0], fg="#b54747")
+            self.connection_test_status.config(text=values[0], fg="#b54747")
+        elif event == "progress":
+            sent, received = values
+            self.send_progress["value"] = int(sent * 100)
+            self.send_percent.config(text=f"{int(sent * 100)}%")
+            self.receive_progress["value"] = int(received * 100)
+            self.receive_percent.config(text=f"{int(received * 100)}%")
+        elif event == "sent":
+            self.transfer_running = False
+            self.send_button.config(text="Enviar archivo", bg="#1769d2")
+            self.transfer_status.config(text=f"Archivo enviado correctamente: {Path(values[0]).name}", fg=ACCENT)
+        elif event == "received":
+            self._save_received_file(*values)
+
+    def _save_received_file(self, data, extension, transfer_id):
+        destination = filedialog.asksaveasfilename(
+            title="Guardar archivo recibido",
+            initialfile=f"recibido_{transfer_id:08X}.{extension}",
+            defaultextension=f".{extension}",
+            filetypes=[(extension.upper(), f"*.{extension}"), ("Todos los archivos", "*.*")],
+        )
+        if not destination:
+            self.transfer_status.config(text="Transferencia recibida; el archivo no se guardó.", fg="#b54747")
+            return
+        try:
+            Path(destination).write_bytes(data)
+        except OSError as exc:
+            self.transfer_status.config(text=f"No se pudo guardar el archivo: {exc}", fg="#b54747")
+            return
+        self.received_placeholder.pack_forget()
+        self._label(self.received, Path(destination).name, fg=TEXT,
+                    font=("Helvetica", 10)).pack(anchor="w", pady=6)
+        self.transfer_status.config(text=f"Archivo recibido: {Path(destination).name}", fg=ACCENT)
+
     def choose_file(self):
         path = filedialog.askopenfilename(
             title="Seleccionar archivo",
@@ -375,73 +369,6 @@ class FileTransferApp:
             self.selected_file = path
             self.file_label.config(text=path.rsplit("/", 1)[-1], fg=TEXT)
             self.transfer_status.config(text="Archivo listo para enviar.", fg=MUTED)
-
-    def _listen_for_start(self):
-        """Escucha avisos de handshake y tramas START desde el Arduino."""
-        buffer = bytearray()
-        line = bytearray()
-        in_frame = False
-        while self.serial_reader_running and self.serial_connection is not None:
-            try:
-                value = self.serial_connection.read(1)
-            except Exception:
-                break
-            if not value:
-                continue
-
-            byte = value[0]
-            if byte == 0x7E:
-                if in_frame and buffer:
-                    frame = bytes(buffer)
-                    if self._is_start_frame(frame):
-                        self.root.after(0, self._show_start_received, frame)
-                    buffer.clear()
-                    in_frame = False
-                else:
-                    buffer.clear()
-                    in_frame = True
-            elif in_frame:
-                buffer.append(byte)
-            elif byte == 10:
-                self.root.after(0, self._handle_handshake_line, bytes(line).strip())
-                line.clear()
-            elif byte != 13:
-                line.append(byte)
-
-    def _handle_handshake_line(self, line):
-        text = line.decode("ascii", errors="ignore")
-        if text.startswith("DUINO_CONNECTED:"):
-            token = text.partition(":")[2]
-        elif text.startswith("DUINO_ACK:"):
-            token = text.partition(":")[2]
-            if token != getattr(self, "pending_handshake", None):
-                return
-        else:
-            return
-        if token:
-            if token == getattr(self, "pending_handshake", None):
-                self.pending_handshake = None
-            self.connection_test_status.config(
-                text="Enlace UNO–Nano confirmado: respuesta recibida por RX/TX.", fg=ACCENT
-            )
-            self.connection_indicator.config(text="●  UNO–Nano conectado", fg=ACCENT)
-
-    @classmethod
-    def _is_start_frame(cls, frame):
-        # control + seq + ack + payload length + 14-byte START + checksum
-        if len(frame) != 3 + 2 + 14 + 2 or frame[0] != 0x03:
-            return False
-        payload_length = int.from_bytes(frame[3:5], "big")
-        if payload_length != 14:
-            return False
-        return cls._ones_complement_checksum(frame[:-2]) == int.from_bytes(frame[-2:], "big")
-
-    def _show_start_received(self, frame):
-        transfer_id = int.from_bytes(frame[5:9], "big")
-        self.transfer_status.config(
-            text=f"Conexión iniciada: se recibió START (transferencia {transfer_id:08X}).",
-            fg=ACCENT,
-        )
 
     def test_reconstruction(self):
         source_path = filedialog.askopenfilename(
@@ -506,56 +433,30 @@ class FileTransferApp:
         if self.transfer_running:
             return
 
+        if self.protocol_worker is None:
+            self.transfer_status.config(text="Conecta el Arduino con «Probar conexión» primero.", fg="#b54747")
+            return
         try:
-            with open(self.selected_file, "rb") as selected_file:
-                file_data = selected_file.read()
-            payload_size = int(self.payload_choice.get().split()[0])
-            baudrate = int(self.baud_choice.get().split()[0])
-            self.send_start_frame(self.selected_file)
-        except (OSError, ValueError, AttributeError) as exc:
+            file_path = self.selected_file
+            file_data = Path(file_path).read_bytes()
+            if len(file_data) > 0xFFFFFFFF:
+                raise ValueError("El protocolo admite archivos de hasta 4 GiB.")
+            extension_types = {".txt": FileType.TXT, ".pdf": FileType.PDF, ".png": FileType.PNG}
+            file_type = extension_types.get(Path(file_path).suffix.lower())
+            if file_type is None:
+                raise ValueError("Solo se admiten archivos TXT, PDF y PNG.")
+            config = self._current_config()
+            self.protocol_worker.update_config(config, self._current_timeout())
+        except (OSError, ValueError, AttributeError, KeyError) as exc:
             self.transfer_status.config(text=f"No se pudo preparar el archivo: {exc}", fg="#b54747")
             return
 
         self.transfer_running = True
         self.send_button.config(text="Enviando...", bg="#62758a")
-        self.transfer_status.config(text="Procesando tramas localmente; consulta la consola.", fg=MUTED)
-        threading.Thread(
-            target=self._simulate_transfer,
-            args=(file_data, payload_size, baudrate, self.selected_file.rsplit("/", 1)[-1]),
-            daemon=True,
-        ).start()
-
-    def _simulate_transfer(self, file_data, payload_size, baudrate, file_name):
-        total_frames = max(1, (len(file_data) + payload_size - 1) // payload_size)
-        print(f"\nInicio de envío local: {file_name}")
-        print(f"Tamaño: {len(file_data)} bytes | Carga útil: {payload_size} bytes | Velocidad: {baudrate} bps")
-
-        for frame_index in range(total_frames):
-            start = frame_index * payload_size
-            frame_data = file_data[start:start + payload_size]
-            #(f"Trama {frame_index + 1}/{total_frames} ({len(frame_data)} bytes): {frame_data.hex(' ')}")
-            sent_bytes = min(start + len(frame_data), len(file_data))
-            percent = int(sent_bytes * 100 / len(file_data)) if file_data else 100
-            self.root.after(0, self._update_transfer_progress, percent, frame_index + 1, total_frames)
-
-            # Simula UART con 10 bits por byte (inicio, datos y parada).
-            time.sleep(len(frame_data) * 10 / baudrate)
-
-        print("Envío local completado. No se transmitieron datos por el puerto serial.\n")
-        self.root.after(0, self._finish_transfer, total_frames, len(file_data))
-
-    def _update_transfer_progress(self, percent, frame_number, total_frames):
-        self.send_progress["value"] = percent
-        self.send_percent.config(text=f"{percent}%")
-        self.transfer_status.config(text=f"Procesando trama {frame_number} de {total_frames}.", fg=MUTED)
-
-    def _finish_transfer(self, total_frames, total_bytes):
-        self.transfer_running = False
-        self.send_button.config(text="Enviar archivo", bg="#1769d2")
-        self.transfer_status.config(
-            text=f"Procesamiento local completado: {total_frames} tramas, {total_bytes} bytes.",
-            fg=ACCENT,
-        )
+        self.send_progress["value"] = 0
+        self.send_percent.config(text="0%")
+        self.transfer_status.config(text="Verificando el enlace antes de enviar START…", fg=MUTED)
+        self.protocol_worker.send_file(file_path, file_data, file_type)
 
 
 if __name__ == "__main__":

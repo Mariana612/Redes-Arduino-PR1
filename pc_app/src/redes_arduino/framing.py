@@ -57,6 +57,24 @@ class PhysicalFrame:
     reason: str | None = None
 
 
+def decode_physical(raw: bytes, use_hamming: bool) -> PhysicalFrame:
+    """Quita el escape y, si corresponde, decodifica Hamming de una trama física."""
+    try:
+        coded = unstuff(raw)
+    except ValueError as exc:
+        return PhysicalFrame(b"", False, reason=str(exc))
+
+    if not use_hamming:
+        return PhysicalFrame(coded, True)
+    if len(coded) % 2:
+        return PhysicalFrame(b"", False, reason="longitud Hamming impar")
+
+    body, stats = hamming.decode_bytes(coded)
+    if stats.uncorrectable:
+        return PhysicalFrame(body, False, stats=stats, reason="error Hamming no corregible")
+    return PhysicalFrame(body, True, stats=stats)
+
+
 def encode_physical(
     body: bytes,
     use_hamming: bool,
