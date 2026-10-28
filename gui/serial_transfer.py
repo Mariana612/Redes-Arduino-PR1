@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pc_app" / "src"))
 
 from redes_arduino.framing import Deframer, encode_physical  # noqa: E402
-from redes_arduino.frame import Frame, decode  # noqa: E402
+from redes_arduino.frame import decode  # noqa: E402
 from redes_arduino.messages import FileType, Speed  # noqa: E402
 from redes_arduino.monitor import Phase  # noqa: E402
 from redes_arduino.session import Endpoint, LinkConfig  # noqa: E402
@@ -46,6 +46,16 @@ class SerialTransferWorker:
 
     def close(self):
         self._running = False
+        try:
+            self.serial.cancel_read()
+        except (AttributeError, OSError):
+            pass
+        if self.thread is not threading.current_thread():
+            self.thread.join(timeout=2)
+
+    @property
+    def stopped(self):
+        return not self.thread.is_alive()
 
     def _run(self):
         line = bytearray()
@@ -54,16 +64,22 @@ class SerialTransferWorker:
             if time.monotonic() < self.ready_at:
                 time.sleep(0.05)
                 continue
-            self._commands()
-            if self.pending_deadline is not None and time.monotonic() >= self.pending_deadline:
-                self.pending_deadline = None
-                self.pending_token = None
-                self.pending_file = None
-                self.notify("error", "No hubo respuesta del otro equipo al handshake de configuración.")
             try:
+                self._commands()
+                if self.pending_deadline is not None and time.monotonic() >= self.pending_deadline:
+                    self.pending_deadline = None
+                    self.pending_token = None
+                    self.pending_file = None
+                    self.notify(
+                        "error",
+                        "No hubo respuesta al handshake. Verifica que ambas aplicaciones estén abiertas y que ambos Arduinos tengan cargados los sketches puente actualizados.",
+                    )
                 chunk = self.serial.read(1024)
             except Exception as exc:
-                self.notify("error", f"Error de puerto serial: {exc}")
+                if self._running:
+                    self.notify("error", f"Error de puerto serial: {exc}")
+                break
+            if not self._running:
                 break
             for byte in chunk:
                 if byte == 0x7E:
@@ -89,7 +105,12 @@ class SerialTransferWorker:
                         line.append(byte)
                     else:
                         line.clear()
-            self._pump_protocol()
+            try:
+                self._pump_protocol()
+            except Exception as exc:
+                if self._running:
+                    self.notify("error", f"Error de transferencia serial: {exc}")
+                break
 
     def _commands(self):
         while True:
@@ -234,6 +255,8 @@ class SerialTransferWorker:
         # Keep USB bursts within the slower SoftwareSerial receiver's buffer.
         chunk_size = 16
         for start in range(0, len(wire), chunk_size):
+            if not self._running:
+                return
             chunk = wire[start:start + chunk_size]
             self.serial.write(chunk)
             time.sleep(len(chunk) * 12 / self.config.speed.baud)

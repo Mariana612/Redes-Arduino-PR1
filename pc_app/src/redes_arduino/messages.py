@@ -7,7 +7,7 @@ de 0x00 marcados como "propuesta" no los fija el informe de la Etapa 1.
 import struct
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Self
+from typing import Any, TypeVar
 
 from .frame import Frame, FrameError, FrameType
 
@@ -55,7 +55,10 @@ def _unpack(fmt: str, payload: bytes, name: str) -> tuple[Any, ...]:
     return struct.unpack(fmt, payload)
 
 
-def _enum[E: IntEnum](cls: type[E], value: int, name: str) -> E:
+E = TypeVar("E", bound=IntEnum)
+
+
+def _enum(cls: type[E], value: int, name: str) -> E:
     try:
         return cls(value)
     except ValueError:
@@ -87,7 +90,7 @@ class Start:
         return Frame.control(FrameType.START, payload)
 
     @classmethod
-    def from_payload(cls, payload: bytes) -> Self:
+    def from_payload(cls, payload: bytes) -> "Start":
         tid, size, ftype, speed, psize, window, ham = _unpack(cls.FMT, payload, "START")
         if psize not in PAYLOAD_SIZES:
             raise FrameError(f"START: tamaño de carga inválido {psize}")
@@ -118,7 +121,7 @@ class StartAck:
         )
 
     @classmethod
-    def from_payload(cls, payload: bytes) -> Self:
+    def from_payload(cls, payload: bytes) -> "StartAck":
         tid, status = _unpack(cls.FMT, payload, "START_ACK")
         return cls(int(tid), _enum(StartStatus, status, "START_ACK estado"))
 
@@ -133,7 +136,7 @@ class Ack:
         return Frame.ack_frame(self.next_expected, struct.pack(self.FMT, self.transfer_id))
 
     @classmethod
-    def from_frame(cls, frame: Frame) -> Self:
+    def from_frame(cls, frame: Frame) -> "Ack":
         (tid,) = _unpack(cls.FMT, frame.payload, "ACK")
         return cls(int(tid), frame.ack)
 
@@ -150,7 +153,7 @@ class Fin:
         return Frame.control(FrameType.FIN, struct.pack(self.FMT, self.transfer_id, self.sha256))
 
     @classmethod
-    def from_payload(cls, payload: bytes) -> Self:
+    def from_payload(cls, payload: bytes) -> "Fin":
         tid, digest = _unpack(cls.FMT, payload, "FIN")
         assert isinstance(digest, bytes)
         return cls(int(tid), digest)
@@ -168,7 +171,7 @@ class FinAck:
         )
 
     @classmethod
-    def from_payload(cls, payload: bytes) -> Self:
+    def from_payload(cls, payload: bytes) -> "FinAck":
         tid, status = _unpack(cls.FMT, payload, "FIN_ACK")
         return cls(int(tid), _enum(FinStatus, status, "FIN_ACK estado"))
 
@@ -183,6 +186,6 @@ class Abort:
         return Frame.control(FrameType.ABORT, struct.pack(self.FMT, self.transfer_id, self.reason))
 
     @classmethod
-    def from_payload(cls, payload: bytes) -> Self:
+    def from_payload(cls, payload: bytes) -> "Abort":
         tid, reason = _unpack(cls.FMT, payload, "ABORT")
         return cls(int(tid), _enum(AbortReason, reason, "ABORT causa"))

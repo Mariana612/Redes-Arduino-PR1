@@ -256,10 +256,19 @@ class FileTransferApp:
 
             config = self._current_config()
             timeout_seconds = self._current_timeout()
+            if self.protocol_worker is not None:
+                old_worker = self.protocol_worker
+                old_worker.close()
+                if not old_worker.stopped:
+                    self.connection_test_status.config(
+                        text="El lector serial anterior sigue activo. Espera un momento y vuelve a probar.",
+                        fg="#b54747",
+                    )
+                    return
+                self.protocol_worker = None
             if self.serial_connection is not None and self.serial_connection.is_open:
-                if self.protocol_worker is not None:
-                    self.protocol_worker.close()
                 self.serial_connection.close()
+            self.serial_connection = None
 
             self.serial_connection = serial.Serial(
                 port=port,
