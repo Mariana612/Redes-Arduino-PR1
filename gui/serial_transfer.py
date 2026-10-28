@@ -28,6 +28,7 @@ class SerialTransferWorker:
         self.deframer = Deframer(config.hamming)
         self.pending_token = None
         self.pending_deadline = None
+        self.pending_attempts = 0
         self.pending_file = None
         self.last_progress = 0.0
         self.ready_at = time.monotonic() + 2.0  # USB serial opening resets most Arduino boards.
@@ -67,13 +68,20 @@ class SerialTransferWorker:
             try:
                 self._commands()
                 if self.pending_deadline is not None and time.monotonic() >= self.pending_deadline:
-                    self.pending_deadline = None
-                    self.pending_token = None
-                    self.pending_file = None
-                    self.notify(
-                        "error",
-                        "No hubo respuesta al handshake. Verifica que ambas aplicaciones estén abiertas y que ambos Arduinos tengan cargados los sketches puente actualizados.",
-                    )
+                    if self.pending_attempts < 4:
+                        self._send_config_attempt()
+                        self.notify(
+                            "status",
+                            f"Sin respuesta todavía; reintentando handshake ({self.pending_attempts}/4)…",
+                        )
+                    else:
+                        self.pending_deadline = None
+                        self.pending_token = None
+                        self.pending_file = None
+                        self.notify(
+                            "error",
+                            "No hubo respuesta al handshake. Revisa que la otra app tenga abierto su puerto serial y que ambos sketches puente estén cargados.",
+                        )
                 chunk = self.serial.read(1024)
             except Exception as exc:
                 if self._running:
@@ -139,9 +147,14 @@ class SerialTransferWorker:
     def _start_config_check(self, pending_file):
         self.pending_token = f"{time.monotonic_ns() & 0xffffffff:08X}"
         self.pending_file = pending_file
-        self.pending_deadline = time.monotonic() + 5.0
-        self._write_config_line("DUINO_CONFIG", self.pending_token)
+        self.pending_attempts = 0
+        self._send_config_attempt()
         self.notify("status", "Verificando la configuración del otro equipo antes de enviar…")
+
+    def _send_config_attempt(self):
+        self.pending_attempts += 1
+        self.pending_deadline = time.monotonic() + 1.5
+        self._write_config_line("DUINO_CONFIG", self.pending_token)
 
     def _transfer_active(self):
         sender = self.endpoint.sender
@@ -179,6 +192,7 @@ class SerialTransferWorker:
 
         if command == "DUINO_CONFIG":
             self._write_config_line("DUINO_CONFIG_ACK", token)
+            self.notify("peer_request", "El otro equipo solicitó verificar la configuración.")
             if remote == self.config and remote_timeout == self.timeout_seconds:
                 self.notify("connected", "El enlace usa la misma configuración en ambos equipos.")
             else:
@@ -189,6 +203,7 @@ class SerialTransferWorker:
 
         self.pending_token = None
         self.pending_deadline = None
+        self.pending_attempts = 0
         if remote != self.config or remote_timeout != self.timeout_seconds:
             self.pending_file = None
             self.notify(
