@@ -30,6 +30,7 @@ class SerialTransferWorker:
         self.pending_deadline = None
         self.pending_attempts = 0
         self.pending_file = None
+        self.peer_token = None
         self.last_progress = 0.0
         self.ready_at = time.monotonic() + 2.0  # USB serial opening resets most Arduino boards.
         self._running = True
@@ -176,6 +177,11 @@ class SerialTransferWorker:
         except UnicodeDecodeError:
             return
         fields = text.split("|")
+        if len(fields) == 2 and fields[0] == "DUINO_CONFIG_CONFIRM":
+            if fields[1] == self.peer_token:
+                self.peer_token = None
+                self.notify("connected", "Handshake confirmado de ida y vuelta; configuración compatible.")
+            return
         if len(fields) != 7 or fields[0] not in ("DUINO_CONFIG", "DUINO_CONFIG_ACK"):
             return
         command, token = fields[:2]
@@ -191,12 +197,12 @@ class SerialTransferWorker:
             return
 
         if command == "DUINO_CONFIG":
+            self.peer_token = token
             self._write_config_line("DUINO_CONFIG_ACK", token)
-            self.notify("peer_request", "El otro equipo solicitó verificar la configuración.")
             if remote == self.config and remote_timeout == self.timeout_seconds:
-                self.notify("connected", "El enlace usa la misma configuración en ambos equipos.")
+                self.notify("ack_sent", "Solicitud recibida; ACK enviado. Esperando confirmación de regreso…")
             else:
-                self.notify("error", "El otro equipo tiene parámetros distintos; no se iniciará la transferencia.")
+                self.notify("peer_mismatch", "Solicitud recibida y ACK enviado, pero los parámetros no coinciden.")
             return
         if token != self.pending_token:
             return
@@ -212,10 +218,13 @@ class SerialTransferWorker:
             )
             return
 
+        self.serial.write(f"DUINO_CONFIG_CONFIRM|{token}\n".encode("ascii"))
+        self.serial.flush()
+        self.notify("connected", "Handshake confirmado de ida y vuelta; configuración compatible.")
+
         self.endpoint = Endpoint("GUI", self.config)
         self.deframer = Deframer(self.config.hamming)
         if self.pending_file is None:
-            self.notify("connected", "Configuración confirmada en ambos equipos.")
             return
 
         path, data, file_type = self.pending_file

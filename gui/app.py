@@ -330,8 +330,10 @@ class FileTransferApp:
         elif event == "status":
             self.transfer_status.config(text=values[0], fg=MUTED)
             self.connection_test_status.config(text=values[0], fg=MUTED)
-        elif event == "peer_request":
+        elif event == "ack_sent":
             self.connection_test_status.config(text=values[0], fg=MUTED)
+        elif event == "peer_mismatch":
+            self.connection_test_status.config(text=values[0], fg="#b54747")
         elif event == "error":
             self.transfer_running = False
             self.send_button.config(text="Enviar archivo", bg="#1769d2")
