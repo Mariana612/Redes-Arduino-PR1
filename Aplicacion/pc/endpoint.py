@@ -2906,7 +2906,7 @@ class DUINOTransferApp:
         ttk.Label(hamming, text="Estadísticas de las tramas que este Arduino recibe por el enlace físico.").pack(
             anchor="w", pady=(0, 6))
         self.hamming_events = self._tree(
-            hamming, ("Hora", "Trama", "Bloques", "Corregidos", "Paridad global",
+            hamming, ("Hora", "Trama", "Bloques", "Tasa de error", "Corregidos", "Paridad global",
                       "Errores dobles", "Último error", "Bloque error", "Posición", "Palabra"))
         self.hamming_counts = {"blocks": 0, "corrected": 0, "global": 0, "double": 0}
 
@@ -3126,11 +3126,20 @@ class DUINOTransferApp:
             self.hamming_counts["corrected"] = data["total_corrected"]
             self.hamming_counts["global"] = data["total_global"]
             self.hamming_counts["double"] = data["total_double"]
+            frame_error_blocks = data["corrected"] + data["global_parity"] + data["double"]
+            frame_error_rate = (100.0 * frame_error_blocks / data["blocks"]
+                                if data["blocks"] else 0.0)
+            total_error_blocks = (self.hamming_counts["corrected"] +
+                                  self.hamming_counts["global"] +
+                                  self.hamming_counts["double"])
+            total_error_rate = (100.0 * total_error_blocks / self.hamming_counts["blocks"]
+                                if self.hamming_counts["blocks"] else 0.0)
             status_names = {0: "Sin error", 1: "Bit corregido", 2: "Paridad global", 3: "Doble error"}
             result = status_names.get(data["status"], "Desconocido")
             self.hamming_events.insert(
                 "", "end", values=(datetime.now().strftime("%H:%M:%S"), data["frame_id"],
-                                   data["blocks"], data["corrected"], data["global_parity"],
+                                   data["blocks"], f"{frame_error_rate:.2f}%",
+                                   data["corrected"], data["global_parity"],
                                    data["double"], result,
                                    data["last_block"] if data["status"] else "—",
                                    data["position"] or "—",
@@ -3142,11 +3151,13 @@ class DUINOTransferApp:
                 self.hamming_events.delete(children[0])
             self.hamming_summary.set(
                 f"Bloques: {self.hamming_counts['blocks']} · "
+                f"Tasa de error: {total_error_rate:.2f}% · "
                 f"Corregidos: {self.hamming_counts['corrected']} · "
                 f"Paridad global: {self.hamming_counts['global']} · "
                 f"Errores dobles: {self.hamming_counts['double']}")
             self.write_log(
-                f"Hamming trama {data['frame_id']}: {data['corrected']} corregidos, "
+                f"Hamming trama {data['frame_id']}: tasa de error {frame_error_rate:.2f}% "
+                f"({frame_error_blocks}/{data['blocks']} bloques), {data['corrected']} corregidos, "
                 f"{data['global_parity']} de paridad global, {data['double']} dobles; "
                 f"último estado: {result}")
         elif kind == "error":
